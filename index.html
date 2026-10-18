@@ -182,6 +182,8 @@ li.is-done .pill{opacity:.55}
 details.more summary{cursor:pointer;color:var(--muted);font-size:13px;padding:4px 2px;list-style:none}
 details.more summary::-webkit-details-marker{display:none}
 details.more[open] summary{margin-bottom:8px}
+details.quiet summary{font:400 12px var(--f-mono);color:var(--muted);opacity:.85;letter-spacing:.02em}
+details.quiet .list{opacity:.8}
 .progress{display:grid;gap:6px}
 .bar{height:6px;border-radius:99px;background:var(--surface-2);overflow:hidden}
 .bar i{display:block;height:100%;background:var(--moss);border-radius:99px;transition:width .4s}
@@ -351,7 +353,8 @@ const DAY = 864e5;
 
 /* ---------- state ---------- */
 let daily = null, jobs = null, loaded = false, offline = false;
-let marks = Object.assign({done:{}, saved:{}, hidden:{}, starred:{}, dismissed:{}, stage:{}, stageAt:{}, snap:{}}, LS.get("fd-marks", {}));
+let marks = Object.assign({done:{}, saved:{}, hidden:{}, starred:{}, dismissed:{}, stage:{}, stageAt:{}, snap:{}, doneLog:{}}, LS.get("fd-marks", {}));
+if(!marks.doneLog) marks.doneLog = {};
 const DEFAULT_ME = {
   countdowns:[{id:"spaceapps", title:"NASA Space Apps Challenge", date:"2026-11-14T09:00:00+01:00"}],
   tfg:{phases:["Topic & registration","Literature review","Sentinel-2 data download","Pre-processing","Analysis & indices","Results & figures","Writing","Defence"].map((t,i)=>({id:"p"+i, t, done:false}))},
@@ -394,9 +397,22 @@ const TONES = ["forest","ochre","sky","terra","moss","plum"];
 function courseTone(c){ if(!c) return "forest"; let h=7; for(const ch of String(c).toLowerCase()) h=(h*31+ch.charCodeAt(0))>>>0; return TONES[h%TONES.length]; }
 
 /* ---------- marks ---------- */
+function findItem(id){
+  if(!daily) return null;
+  const pool = [...(daily.deadlines||[]), ...(daily.newItems||[])];
+  const d = pool.find(x => dlId(x) === id); if(d) return {t:d.title, c:d.course||"", due:d.due||""};
+  const e = (daily.emails||[]).find(x => "e:"+(x.id||slug(x.from+x.subject)) === id); if(e) return {t:"Reply: "+e.subject, c:"Email", due:e.due||""};
+  return null;
+}
 function flip(kind, id){
   const m = marks[kind] || (marks[kind] = {});
-  if(m[id]) delete m[id]; else { m[id] = Date.now(); if(kind==="done" && navigator.vibrate) try{navigator.vibrate(12);}catch(_){} }
+  if(m[id]){ delete m[id]; if(kind==="done") delete marks.doneLog[id]; }
+  else {
+    m[id] = Date.now();
+    if(kind==="done"){ const it = findItem(id); if(it) marks.doneLog[id] = {...it, at: Date.now()}; if(navigator.vibrate) try{navigator.vibrate(12);}catch(_){} }
+  }
+  const cut = Date.now() - 21*DAY;
+  for(const [k,v] of Object.entries(marks.doneLog)) if(!v || v.at < cut) delete marks.doneLog[k];
   saveMarks(); render();
 }
 const on = (kind,id) => !!(marks[kind] && marks[kind][id]);
@@ -611,7 +627,12 @@ function renderToday(){
   if(next) h += ringHero(next.title, "Next deadline"+(next.course?" · "+esc(next.course):""), fmtDue(next.due), next._ms, 14*DAY, tone(next._ms)==="hot"?"hot":"");
   else { const cd = nextCountdown(); if(cd) h += ringHero(cd.title, "Countdown", fmtDue(cd.date), msUntil(cd.date), 60*DAY, "ochre"); }
 
-  if(newItems.length) h += `<section><h2>New tasks &amp; deadlines</h2><ul class="list">${newItems.map(deadlineRow).join("")}</ul></section>`;
+  const doneToday = Object.entries(marks.doneLog).filter(([,v]) => v && keyOf(new Date(v.at)) === todayKey());
+  if(newItems.length || doneToday.length){
+    h += `<section><h2>New tasks &amp; deadlines</h2>${newItems.length ? `<ul class="list">${newItems.map(deadlineRow).join("")}</ul>` : ""}`;
+    if(doneToday.length) h += `<details class="more quiet"><summary>✓ ${doneToday.length} done today</summary><ul class="list">${doneToday.map(([id,v]) => historyRow(id, v, true)).join("")}</ul></details>`;
+    h += `</section>`;
+  }
   const freshChanges = changes.filter(c => (daysSince(c.firstSeen) ?? 9) <= 1);
   if(freshChanges.length) h += `<section><h2>Changes</h2><ul class="list">${freshChanges.map(changeRow).join("")}</ul></section>`;
   const emails = (daily && daily.emails || []).filter(e => !on("done", "e:"+(e.id||slug(e.from+e.subject))));
@@ -632,6 +653,19 @@ function renderToday(){
 function changeRow(c){ return li(`<span class="icon" aria-hidden="true">!</span><div class="body"><div class="meta">${ageChip(c.firstSeen)}</div><p class="title">${esc(c.text||c.title)}</p>${c.date?`<p class="sub mono">${fmtDue(c.date)}</p>`:""}</div><span></span>`, {rowCls:"tone-warn"}); }
 function emailRow(e){ const id="e:"+(e.id||slug(e.from+e.subject)), d=on("done",id);
   return li(`${checkbox("done",id,"Mark email from "+(e.from||"")+" as answered")}<div class="body"><div class="meta">${ageChip(e.firstSeen)}</div><p class="title">${esc(e.subject)}</p><p class="sub">${esc(e.from)}${e.ask?" · "+esc(e.ask):""}</p>${safeUrl(e.url)?`<div class="actions"><a class="btn sm" href="${safeUrl(e.url)}" target="_blank" rel="noopener">Open in Gmail ↗</a></div>`:""}</div>${e.due?`<span class="pill ${tone(msUntil(e.due))}">${esc(rel(msUntil(e.due)))}</span>`:"<span></span>"}`, {cls:d?"is-done":"", swipe:d?null:id}); }
+
+function historyRow(id, v, done){
+  const when = done ? "done "+new Date(v.at).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}) : "was due "+fmtDue(v.due);
+  return li(`<span class="icon ${done?"c-moss":"c-terra"}" aria-hidden="true">${done?"✓":"✗"}</span><div class="body"><div class="meta">${v.c?`<span class="label">${esc(v.c)}</span>`:""}</div><p class="title" style="font-weight:500">${esc(v.t)}</p><p class="sub mono">${when}</p></div>${done?`<button class="btn sm ghost" data-mark="done" data-id="${esc(id)}">Undo</button>`:"<span></span>"}`, {cls: done ? "is-done" : ""});
+}
+function doneHistory(){
+  const cut = Date.now() - 14*DAY;
+  const done = Object.entries(marks.doneLog).filter(([,v]) => v && v.at >= cut).sort((a,b) => b[1].at - a[1].at);
+  const missed = (daily && daily.deadlines || []).filter(x => { const ms = msUntil(x.due); return ms!=null && ms < 0 && ms > -14*DAY && !on("done", dlId(x)); })
+    .map(x => [dlId(x), {t:x.title, c:x.course||"", due:x.due}]);
+  if(!done.length && !missed.length) return "";
+  return `<details class="more quiet"><summary>Last 2 weeks · ✓ ${done.length} done${missed.length?` · ✗ ${missed.length} missed`:""}</summary><ul class="list">${[...missed.map(([id,v]) => historyRow(id,v,false)), ...done.map(([id,v]) => historyRow(id,v,true))].join("")}</ul></details>`;
+}
 
 /* ---------- UNI ---------- */
 function renderUni(){
@@ -661,9 +695,8 @@ function renderUni(){
     for(const x of open){ const k = x.due ? keyOf(dueDate(x.due)) : "zz"; (groups[k] = groups[k] || []).push(x); }
     h += Object.keys(groups).sort().map(k => `<div class="daygroup">${k==="zz"?"No date":new Date(k+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div><ul class="list">${groups[k].map(deadlineRow).join("")}</ul>`).join("") || none(uniDay ? "Nothing due that day." : "All caught up.");
     h += `<div class="progress"><div class="bar"><i style="width:${Math.round(100*closed.length/total)}%"></i></div><div class="lbl">${closed.length} of ${total} done</div></div>`;
-    if(closed.length) h += `<details class="more"><summary>Show ${closed.length} done</summary><ul class="list">${closed.map(deadlineRow).join("")}</ul></details>`;
   } else h += none("No deadlines on the board.");
-  h += `</section>`;
+  h += doneHistory() + `</section>`;
 
   const changes = daily.changes || [];
   h += `<section><h2>Changes <small>last 7 days</small></h2>${changes.length ? `<ul class="list">${changes.map(changeRow).join("")}</ul>` : none("No room or schedule changes.")}</section>`;
@@ -951,8 +984,18 @@ async function load(pass){
   LS.set("fd-blob", blob);
   lastStamp = blob.stamp || "";
   daily = data.daily || null; jobs = data.jobs || null; loaded = true;
-  syncWords(); render();
+  syncWords(); backfillLog(); render();
   return true;
+}
+// items ticked before the history existed get logged from the current board
+function backfillLog(){
+  let ch = false;
+  for(const [id, t] of Object.entries(marks.done)){
+    if(marks.doneLog[id]) continue;
+    const it = findItem(id); if(!it) continue;
+    marks.doneLog[id] = {...it, at: typeof t === "number" ? t : Date.now()}; ch = true;
+  }
+  if(ch) saveMarks();
 }
 function getPass(){ try { return localStorage.getItem("hub-key"); } catch(e){ return null; } }
 async function refreshAll(force){
