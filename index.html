@@ -133,6 +133,12 @@ footer{color:var(--muted);font:400 11px var(--f-mono);text-align:center;padding-
 .hero .k{font:500 10.5px var(--f-mono);text-transform:uppercase;letter-spacing:.09em;opacity:.85}
 .hero .t{font:600 19px/1.25 var(--f-display);margin:3px 0;text-wrap:balance}
 .hero .d{font-size:13px;opacity:.9}
+button.hero{width:100%;border:0;text-align:left;font:inherit;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:transform .15s}
+button.hero:active{transform:scale(.985)}
+.hdots{display:flex;gap:5px;align-items:center;margin-top:8px}
+.hdots i{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.35;transition:opacity .2s,width .2s}
+.hdots i.on{opacity:1;width:16px;border-radius:3px}
+.hdots span{font:400 10px var(--f-mono);opacity:.7;margin-left:6px;letter-spacing:.04em}
 .ring{position:relative;width:84px;height:84px;display:grid;place-items:center}
 .ring svg{position:absolute;inset:0;transform:rotate(-90deg)}
 .ring .trk{stroke:currentColor;opacity:.22}
@@ -443,14 +449,30 @@ function allDeadlines(){
     .filter(x => on("done", x._id) ? (x._ms==null || x._ms > -DAY) : (x._ms==null || x._ms > -7*DAY))
     .sort((a,b) => (a._ms ?? 1e15) - (b._ms ?? 1e15));
 }
-function ringHero(title, kicker, when, ms, horizon, cls){
+function ringHero(title, kicker, when, ms, horizon, cls, extra){
   const hrs = ms!=null ? ms/36e5 : null;
   const num = hrs==null ? "–" : hrs < 48 ? Math.max(0,Math.round(hrs)) : Math.round(hrs/24);
   const unit = hrs==null ? "" : hrs < 48 ? "hours" : "days";
   const frac = ms==null ? 0 : Math.max(0, Math.min(1, ms/horizon));
   const C = 2*Math.PI*36;
-  return `<div class="hero ${cls||""}"><div class="ring"><svg viewBox="0 0 84 84" aria-hidden="true"><circle class="trk" cx="42" cy="42" r="36" fill="none" stroke-width="6"/><circle class="val" cx="42" cy="42" r="36" fill="none" stroke-width="6" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C*(1-frac)).toFixed(1)}"/></svg><div class="num">${num}<span class="unit">${unit}</span></div></div>
-    <div><div class="k">${kicker}</div><div class="t">${esc(title)}</div><div class="d">${when}</div></div></div>`;
+  const tag = extra ? "button" : "div";
+  return `<${tag} class="hero ${cls||""}"${extra?` data-act="hero" aria-label="Show next countdown"`:""}><div class="ring"><svg viewBox="0 0 84 84" aria-hidden="true"><circle class="trk" cx="42" cy="42" r="36" fill="none" stroke-width="6"/><circle class="val" cx="42" cy="42" r="36" fill="none" stroke-width="6" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C*(1-frac)).toFixed(1)}"/></svg><div class="num">${num}<span class="unit">${unit}</span></div></div>
+    <div><div class="k">${kicker}</div><div class="t">${esc(title)}</div><div class="d">${when}</div>${extra||""}</div></${tag}>`;
+}
+// everything the Today countdown card can cycle through: upcoming deadlines first, then personal countdowns
+let heroIdx = 0;
+function heroItems(open){
+  const dl = open.filter(x => x._ms!=null && x._ms >= 0).slice(0,5).map(x => ({title:x.title, kicker:"Next deadline"+(x.course?" · "+esc(x.course):""), when:fmtDue(x.due), ms:x._ms, horizon:14*DAY, cls: tone(x._ms)==="hot"?"hot":""}));
+  const cd = (me.countdowns||[]).map(c => ({c, ms:msUntil(c.date)})).filter(x => x.ms!=null && x.ms > -DAY).sort((a,b)=>a.ms-b.ms)
+    .map(({c,ms}) => ({title:c.title, kicker:"Countdown", when:fmtDue(c.date), ms, horizon:60*DAY, cls:"ochre"}));
+  return [...dl, ...cd];
+}
+function heroCard(open){
+  const items = heroItems(open); if(!items.length) return "";
+  if(heroIdx >= items.length) heroIdx = 0;
+  const it = items[heroIdx];
+  const dots = items.length > 1 ? `<div class="hdots" aria-hidden="true">${items.map((_,i)=>`<i class="${i===heroIdx?"on":""}"></i>`).join("")}<span>tap for next</span></div>` : "";
+  return ringHero(it.title, it.kicker, it.when, it.ms, it.horizon, it.cls, items.length > 1 ? dots : "");
 }
 
 /* ---------- weather & environment ---------- */
@@ -623,9 +645,7 @@ function renderToday(){
   if(offline) h += `<div class="offline">Offline · showing the last saved board</div>`;
   h += weatherCard();
 
-  const next = open.find(x => x._ms==null || x._ms >= 0) || open[0];
-  if(next) h += ringHero(next.title, "Next deadline"+(next.course?" · "+esc(next.course):""), fmtDue(next.due), next._ms, 14*DAY, tone(next._ms)==="hot"?"hot":"");
-  else { const cd = nextCountdown(); if(cd) h += ringHero(cd.title, "Countdown", fmtDue(cd.date), msUntil(cd.date), 60*DAY, "ochre"); }
+  h += heroCard(open);
 
   const doneToday = Object.entries(marks.doneLog).filter(([,v]) => v && keyOf(new Date(v.at)) === todayKey());
   if(newItems.length || doneToday.length){
@@ -917,6 +937,7 @@ document.addEventListener("click", e => {
   if(t.id === "word" && !t.dataset.act){ const f = t.classList.toggle("flipped"); t.setAttribute("aria-expanded", String(f)); return; }
   if(t.dataset.mark){ flip(t.dataset.mark, t.dataset.id); return; }
   const a = t.dataset.act, id = t.dataset.id;
+  if(a==="hero"){ heroIdx++; render(); return; }
   if(a==="refresh"){ if(t.classList.contains("spin")) return; t.classList.add("spin"); const t0 = Date.now(); refreshAll(true).finally(() => setTimeout(render, Math.max(0, 700-(Date.now()-t0)))); return; }
   if(a==="review"){ startReview(); window.scrollTo({top:0}); return; }
   if(a==="reveal"){ rev.shown = true; render(); return; }
