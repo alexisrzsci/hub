@@ -369,6 +369,7 @@ let tab = LS.get("fd-tab2", "today");
 if (["#today","#uni","#jobs","#me"].includes(location.hash)) tab = location.hash.slice(1);
 let uniCourse = "all", uniDay = null, jobFilter = "fits";
 let rev = null; // flashcard review session
+let refreshNote = null; // {t, msg} feedback after tapping Refresh
 const saveMarks = () => LS.set("fd-marks", marks), saveMe = () => LS.set("fd-me", me), saveCards = () => LS.set("fd-cards", cards);
 
 /* ---------- dates ---------- */
@@ -600,7 +601,7 @@ function renderToday(){
     <div class="k"><span class="pulse ${fresh?"on":""}"></span>${esc(greeting())}</div>
     <p class="big">${daily ? esc(fresh ? fresh+" new thing"+(fresh>1?"s":"")+" from UMU" : "Nothing new from UMU") : "Your desk is loading"}</p>
     ${daily && daily.headline ? `<p class="sub">${esc(daily.headline)}</p>` : ""}
-    <div class="row-end"><span class="upd">${g && !isNaN(g) ? "Board updated "+ago(g.getTime()) : loaded ? "No board yet" : "Fetching…"}</span>
+    <div class="row-end"><span class="upd">${noteText(g && !isNaN(g) ? "Board updated "+ago(g.getTime()) : loaded ? "No board yet" : "Fetching…")}</span>
       <button class="refresh" data-act="refresh" aria-label="Refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>Refresh</button></div>
   </div>`;
   if(offline) h += `<div class="offline">Offline · showing the last saved board</div>`;
@@ -719,7 +720,7 @@ function renderJobs(){
     <div class="k"><span class="pulse ${actionN?"on":""}"></span>${jobs.weekOf?"Week of "+esc(jobs.weekOf):"This week"}</div>
     <p class="big">${esc(jobs.headline || (fits.length+" job"+(fits.length===1?"":"s")+" fit this week"))}</p>
     ${actionN?`<p class="sub">${actionN} application update${actionN>1?"s":""} need${actionN>1?"":"s"} you.</p>`:""}
-    <div class="row-end"><span class="upd">${g&&!isNaN(g)?"Jobs updated "+ago(g.getTime()):""}</span><button class="refresh" data-act="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>Refresh</button></div>
+    <div class="row-end"><span class="upd">${noteText(g&&!isNaN(g)?"Jobs updated "+ago(g.getTime()):"")}</span><button class="refresh" data-act="refresh"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>Refresh</button></div>
   </div>`;
   h += `<div class="stats"><div class="stat"><b>${fits.length}</b><span>Fit</span></div><div class="stat"><b>${maybe.length}</b><span>Maybe</span></div><div class="stat"><b>${apps.length}</b><span>Updates</span></div></div>`;
   h += `<section><h2>Application updates</h2>${apps.length ? `<ul class="list">${apps.map(a=>li(`<span class="icon ev" aria-hidden="true">→</span><div class="body"><p class="title">${esc(a.company)}${a.role?" · "+esc(a.role):""}</p><p class="sub">${esc(a.update||"")}</p>${a.action?`<p class="sub"><b>Next:</b> ${esc(a.action)}${a.due?" · <span class='mono'>"+fmtDue(a.due)+"</span>":""}</p>`:""}${safeUrl(a.url)?`<div class="actions"><a class="btn sm" href="${safeUrl(a.url)}" target="_blank" rel="noopener">Open ↗</a></div>`:""}</div><span class="pill ${statusTone(a.status)}">${esc(a.status||"update")}</span>`, {rowCls: statusTone(a.status)==="warn"?"tone-warn":statusTone(a.status)==="hot"?"tone-hot":""})).join("")}</ul>` : none("No application updates right now.")}</section>`;
@@ -883,7 +884,7 @@ document.addEventListener("click", e => {
   if(t.id === "word" && !t.dataset.act){ const f = t.classList.toggle("flipped"); t.setAttribute("aria-expanded", String(f)); return; }
   if(t.dataset.mark){ flip(t.dataset.mark, t.dataset.id); return; }
   const a = t.dataset.act, id = t.dataset.id;
-  if(a==="refresh"){ t.classList.add("spin"); refreshAll(true).finally(()=>render()); return; }
+  if(a==="refresh"){ if(t.classList.contains("spin")) return; t.classList.add("spin"); const t0 = Date.now(); refreshAll(true).finally(() => setTimeout(render, Math.max(0, 700-(Date.now()-t0)))); return; }
   if(a==="review"){ startReview(); window.scrollTo({top:0}); return; }
   if(a==="reveal"){ rev.shown = true; render(); return; }
   if(a==="grade"){ grade(t.dataset.ok==="1"); return; }
@@ -945,18 +946,22 @@ async function load(pass){
   let blob;
   try { blob = await fetch("data.enc.json?t=" + Date.now(), {cache:"no-store"}).then(r => { if(!r.ok) throw new Error("fetch"); return r.json(); }); offline = false; }
   catch(e){ offline = true; const c = LS.get("fd-blob", null); if(!c) throw new Error("fetch"); blob = c; }
-  if(blob.stamp && blob.stamp === lastStamp && daily) return;
+  if(blob.stamp && blob.stamp === lastStamp && daily) return false;
   const data = await decrypt(pass, blob);
   LS.set("fd-blob", blob);
   lastStamp = blob.stamp || "";
   daily = data.daily || null; jobs = data.jobs || null; loaded = true;
   syncWords(); render();
+  return true;
 }
 function getPass(){ try { return localStorage.getItem("hub-key"); } catch(e){ return null; } }
 async function refreshAll(force){
   const p = getPass();
-  await Promise.allSettled([p ? load(p) : Promise.resolve(), fetchEnv(force), fetchNature(force)]);
+  const [b] = await Promise.allSettled([p ? load(p) : Promise.resolve(false), fetchEnv(force), fetchNature(force)]);
+  const hh = new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+  if(force) refreshNote = {t: Date.now(), msg: b.status==="rejected" ? "Couldn't reach the board · "+hh : offline ? "Offline · showing saved board" : b.value ? "New board loaded ✓ · "+hh : "Checked at "+hh+" · already up to date"};
 }
+const noteText = fallback => refreshNote && Date.now()-refreshNote.t < 120000 ? esc(refreshNote.msg) : fallback;
 async function boot(){
   const pass = getPass();
   drawTopo(); render();
