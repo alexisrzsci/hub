@@ -592,7 +592,7 @@ function grade(ok){
 function renderToday(){
   let h = "";
   const all = allDeadlines(), open = all.filter(x => !on("done", x._id));
-  const newItems = (daily && daily.newItems || []).filter(x => x.firstSeen ? daysSince(x.firstSeen) <= 0 : true);
+  const newItems = (daily && daily.newItems || []).filter(x => (x.firstSeen ? daysSince(x.firstSeen) <= 0 : true) && !on("done", dlId(x)));
   const changes = daily && daily.changes || [];
   const ups = daily && daily.updates || [];
   const fresh = newItems.length + changes.filter(c => (daysSince(c.firstSeen) ?? 0) <= 0).length + ups.filter(x => (daysSince(x.firstSeen) ?? 0) <= 0).length + (daily&&daily.opportunities||[]).filter(o => (daysSince(o.firstSeen) ?? 0) <= 0).length;
@@ -614,7 +614,7 @@ function renderToday(){
   if(newItems.length) h += `<section><h2>New tasks &amp; deadlines</h2><ul class="list">${newItems.map(deadlineRow).join("")}</ul></section>`;
   const freshChanges = changes.filter(c => (daysSince(c.firstSeen) ?? 9) <= 1);
   if(freshChanges.length) h += `<section><h2>Changes</h2><ul class="list">${freshChanges.map(changeRow).join("")}</ul></section>`;
-  const emails = daily && daily.emails || [];
+  const emails = (daily && daily.emails || []).filter(e => !on("done", "e:"+(e.id||slug(e.from+e.subject))));
   if(emails.length) h += `<section><h2>Emails to answer</h2><ul class="list">${emails.map(emailRow).join("")}</ul></section>`;
   const events = daily && daily.events || [];
   if(events.length) h += `<section><h2>Today &amp; tomorrow</h2><ul class="list">${events.map(ev=>li(`<span class="icon ev" aria-hidden="true">•</span><div class="body"><p class="title">${esc(ev.title)}</p><p class="sub mono">${esc(ev.when)}</p></div><span></span>`)).join("")}</ul></section>`;
@@ -853,7 +853,7 @@ const introDone = {};
 function headerDate(){ const n=new Date(); $("#date").innerHTML = esc(n.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})) + "<br>DOY " + String(doy(n)).padStart(3,"0"); }
 function badges(){
   const open = allDeadlines().filter(x => !on("done",x._id) && x._ms!=null && x._ms < 3*DAY).length;
-  const newN = daily ? (daily.newItems||[]).filter(x => x.firstSeen ? daysSince(x.firstSeen) <= 0 : true).length + (daily.emails||[]).filter(e=>!on("done","e:"+(e.id||slug(e.from+e.subject)))).length : 0;
+  const newN = daily ? (daily.newItems||[]).filter(x => (x.firstSeen ? daysSince(x.firstSeen) <= 0 : true) && !on("done", dlId(x))).length + (daily.emails||[]).filter(e=>!on("done","e:"+(e.id||slug(e.from+e.subject)))).length : 0;
   const act = jobs ? (jobs.applications||[]).filter(a => ["warn","hot"].includes(statusTone(a.status))).length : 0;
   const due = dueCards().length;
   const set = (id, n) => { const b = $(id); b.hidden = !n; b.textContent = n; };
