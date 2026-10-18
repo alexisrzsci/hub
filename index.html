@@ -479,6 +479,21 @@ async function fetchEnv(force){
   if(a.status==="fulfilled") env.air = a.value;
   if(w.status==="fulfilled" || a.status==="fulfilled"){ env.ts = Date.now(); LS.set("fd-env", env); }
 }
+// NASA Worldview link centred on an EONET event, on the event's date
+function worldviewUrl(geo, cat){
+  let pts = [];
+  const c = geo && geo.coordinates;
+  if(Array.isArray(c)){
+    if(typeof c[0] === "number") pts = [c];
+    else (function walk(a){ for(const x of a){ if(typeof x[0] === "number") pts.push(x); else walk(x); } })(c);
+  }
+  if(!pts.length) return "https://worldview.earthdata.nasa.gov/";
+  const lons = pts.map(p => p[0]), lats = pts.map(p => p[1]), m = 2.5;
+  const box = [Math.min(...lons)-m, Math.min(...lats)-m, Math.max(...lons)+m, Math.max(...lats)+m].map(v => v.toFixed(2)).join(",");
+  const day = String(geo.date || "").slice(0,10);
+  const layers = "MODIS_Terra_CorrectedReflectance_TrueColor,VIIRS_SNPP_CorrectedReflectance_TrueColor(hidden),Coastlines_15m,Reference_Labels_15m" + (/fire/i.test(cat) ? ",VIIRS_NOAA20_Thermal_Anomalies_375m_All" : "");
+  return "https://worldview.earthdata.nasa.gov/?v=" + box + "&l=" + layers + (day ? "&t=" + day + "-T12:00:00Z" : "");
+}
 function seeded(str){ let h=2166136261; for(const c of str) h=Math.imul(h^c.charCodeAt(0),16777619); return (h>>>0); }
 async function fetchNature(force){
   const day = todayKey(), jobsP = [];
@@ -493,13 +508,14 @@ async function fetchNature(force){
         url: o.uri || ("https://www.inaturalist.org/observations/"+o.id), by: (o.user && o.user.login) || ""};
     }));
   }
-  if(force || !nature.earth || Date.now() - nature.earth.ts > 3*36e5){
+  if(force || !nature.earth || nature.earth.v !== 2 || Date.now() - nature.earth.ts > 3*36e5){
     jobsP.push(getJSON("https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=40&days=20").then(j => {
       const evs = (j.events||[]).map(e => {
-        const g = (e.geometry||[]).map(x => x.date).sort().pop() || "";
-        return {title: e.title, cat: (e.categories&&e.categories[0]&&e.categories[0].title) || "Event", date: g, url: (e.sources&&e.sources[0]&&e.sources[0].url) || e.link};
+        const geo = (e.geometry||[]).slice().sort((a,b) => String(a.date).localeCompare(String(b.date))).pop() || {};
+        const cat = (e.categories&&e.categories[0]&&e.categories[0].title) || "Event";
+        return {title: e.title, cat, date: geo.date || "", url: worldviewUrl(geo, cat)};
       }).sort((a,b) => String(b.date).localeCompare(String(a.date))).slice(0,3);
-      nature.earth = {ts: Date.now(), events: evs};
+      nature.earth = {ts: Date.now(), v: 2, events: evs};
     }));
   }
   if(!jobsP.length) return;
@@ -539,7 +555,7 @@ function fieldNotes(){
       <p class="sub">${esc(s.place)}${s.date?" · "+esc(s.date):""}</p><p class="credit">Photo © ${esc(s.by||"observer")} · iNaturalist</p></div></a>`;
   } else h += `<div class="sk" style="height:120px"></div>`;
   if(e && e.events && e.events.length){
-    h += `<div class="card earth"><span class="label c-sky">On Earth now · NASA EONET</span>${e.events.map(x=>`<a class="ev" href="${safeUrl(x.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="icon c-${/fire/i.test(x.cat)?"terra":/storm|cyclone/i.test(x.cat)?"sky":/volcano/i.test(x.cat)?"plum":"ochre"}" aria-hidden="true">${esc(x.cat.slice(0,1))}</span><span class="body"><span class="title" style="font-size:14px">${esc(x.title)}</span><span class="sub mono">${esc(x.cat)}${x.date?" · "+fmtDue(String(x.date).slice(0,10)):""}</span></span></a>`).join("")}</div>`;
+    h += `<div class="card earth"><span class="label c-sky">On Earth now · NASA EONET</span><span class="credit">Tap an event to see it from space in NASA Worldview</span>${e.events.map(x=>`<a class="ev" href="${safeUrl(x.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><span class="icon c-${/fire/i.test(x.cat)?"terra":/storm|cyclone/i.test(x.cat)?"sky":/volcano/i.test(x.cat)?"plum":"ochre"}" aria-hidden="true">${esc(x.cat.slice(0,1))}</span><span class="body"><span class="title" style="font-size:14px">${esc(x.title)}</span><span class="sub mono">${esc(x.cat)}${x.date?" · "+fmtDue(String(x.date).slice(0,10)):""}</span></span></a>`).join("")}</div>`;
   }
   return h + `</div></section>`;
 }
