@@ -1,12 +1,12 @@
 {
   "name": "Alexis Hub",
   "short_name": "Alexis Hub",
-  "description": "Daily UMU board and weekly job digest.",
+  "description": "Field notebook for UMU, jobs, English cards, the TFG and the planet.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#EDF1EE",
-  "theme_color": "#1E6A4D",
+  "background_color": "#F3EFE4",
+  "theme_color": "#2F5D45",
   "icons": [
     {"src": "icon-192.png", "sizes": "192x192", "type": "image/png"},
     {"src": "icon-512.png", "sizes": "512x512", "type": "image/png"},
