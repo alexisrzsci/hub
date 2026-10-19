@@ -914,6 +914,8 @@ function weeklyReview(){
 }
 function renderMe(){
   let h = "";
+  const lb = LS.get("fd-lastbackup", 0), hasData = (me.beca.log||[]).length || Object.keys(marks.notes||{}).length || (me.tfg.phases||[]).some(p=>p.done);
+  if(hasData && Date.now() - lb > 30*DAY) h += `<div class="offline" style="display:flex;justify-content:space-between;align-items:center;gap:10px"><span>${lb?"Last backup over a month ago":"No backup of your logs yet"}</span><button class="btn sm" data-act="backup">Save backup</button></div>`;
   // flashcards
   const total = Object.keys(cards.words).length, due = dueCards().length;
   if(rev){
