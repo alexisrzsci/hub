@@ -752,6 +752,12 @@ function renderToday(){
   if(freshChanges.length) h += `<section><h2>Changes</h2><ul class="list">${freshChanges.map(changeRow).join("")}</ul></section>`;
   const emails = (daily && daily.emails || []).filter(e => !on("done", "e:"+(e.id||slug(e.from+e.subject))));
   if(emails.length) h += `<section><h2>Emails to answer</h2><ul class="list">${emails.map(emailRow).join("")}</ul></section>`;
+  const inbox = (daily && daily.inbox || []), inOpen = inbox.filter(m => !on("done", inboxId(m))), inRead = inbox.length - inOpen.length;
+  if(inbox.length){
+    h += `<section><h2>Inbox highlights <small>personal email · not UMU</small></h2>${inOpen.length ? `<ul class="list">${inOpen.map(inboxRow).join("")}</ul>` : none("All read.")}`;
+    if(inRead) h += `<details class="more quiet"><summary>✓ ${inRead} read</summary><ul class="list">${inbox.filter(m => on("done", inboxId(m))).map(inboxRow).join("")}</ul></details>`;
+    h += `</section>`;
+  }
   const events = daily && daily.events || [];
   if(events.length) h += `<section><h2>Today &amp; tomorrow</h2><ul class="list">${events.map(ev=>li(`<span class="icon ev" aria-hidden="true">•</span><div class="body"><p class="title">${esc(ev.title)}</p><p class="sub mono">${esc(ev.when)}</p></div><span></span>`)).join("")}</ul></section>`;
   if(daily && !newItems.length && !freshChanges.length && !emails.length && !events.length) h += none("Nothing waiting for you today. Enjoy the quiet.");
@@ -766,6 +772,12 @@ function renderToday(){
   return h;
 }
 function changeRow(c){ return li(`<span class="icon" aria-hidden="true">!</span><div class="body"><div class="meta">${ageChip(c.firstSeen)}</div><p class="title">${esc(c.text||c.title)}</p>${c.date?`<p class="sub mono">${fmtDue(c.date)}</p>`:""}</div><span></span>`, {rowCls:"tone-warn"}); }
+const inboxId = m => "i:"+(m.id||slug(m.from+m.subject));
+function inboxRow(m){
+  const id = inboxId(m), d = on("done", id), k = String(m.kind||"").toLowerCase();
+  const c = /prof|uni|academ/.test(k) ? "sky" : /admin|bank|official|bill/.test(k) ? "ochre" : /personal|friend|family/.test(k) ? "plum" : "forest";
+  return li(`${checkbox("done", id, "Mark email from "+(m.from||"")+" as read")}<div class="body"><div class="meta">${m.kind?`<span class="label c-${c}">${esc(m.kind)}</span>`:""}${ageChip(m.firstSeen)}</div><p class="title">${esc(m.subject)}</p><p class="sub">${esc(m.from)}</p>${m.summary?`<p class="sub" style="color:var(--ink)">${esc(m.summary)}</p>`:""}${safeUrl(m.url)?`<div class="actions"><a class="btn sm" href="${safeUrl(m.url)}" target="_blank" rel="noopener">Open in Gmail ↗</a></div>`:""}</div><span></span>`, {cls: d?"is-done":"", swipe: d?null:id});
+}
 function emailRow(e){ const id="e:"+(e.id||slug(e.from+e.subject)), d=on("done",id);
   return li(`${checkbox("done",id,"Mark email from "+(e.from||"")+" as answered")}<div class="body"><div class="meta">${ageChip(e.firstSeen)}</div><p class="title">${esc(e.subject)}</p><p class="sub">${esc(e.from)}${e.ask?" · "+esc(e.ask):""}</p>${safeUrl(e.url)?`<div class="actions"><a class="btn sm" href="${safeUrl(e.url)}" target="_blank" rel="noopener">Open in Gmail ↗</a></div>`:""}</div>${e.due?`<span class="pill ${tone(msUntil(e.due))}">${esc(rel(msUntil(e.due)))}</span>`:"<span></span>"}`, {cls:d?"is-done":"", swipe:d?null:id}); }
 
@@ -1009,7 +1021,7 @@ const introDone = {};
 function headerDate(){ const n=new Date(); $("#date").innerHTML = esc(n.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})) + "<br>DOY " + String(doy(n)).padStart(3,"0"); }
 function badges(){
   const open = allDeadlines().filter(x => !on("done",x._id) && !isSnoozed(x._id) && x._ms!=null && x._ms < 3*DAY).length;
-  const newN = daily ? (daily.newItems||[]).filter(x => (x.firstSeen ? daysSince(x.firstSeen) <= 0 : true) && !on("done", dlId(x)) && !isSnoozed(dlId(x))).length + (daily.emails||[]).filter(e=>!on("done","e:"+(e.id||slug(e.from+e.subject)))).length : 0;
+  const newN = daily ? (daily.newItems||[]).filter(x => (x.firstSeen ? daysSince(x.firstSeen) <= 0 : true) && !on("done", dlId(x)) && !isSnoozed(dlId(x))).length + (daily.emails||[]).filter(e=>!on("done","e:"+(e.id||slug(e.from+e.subject)))).length + (daily.inbox||[]).filter(m => (daysSince(m.firstSeen) ?? 0) <= 0 && !on("done", inboxId(m))).length : 0;
   const act = jobs ? (jobs.applications||[]).filter(a => ["warn","hot"].includes(statusTone(a.status))).length : 0;
   const due = dueCards().length;
   const set = (id, n) => { const b = $(id); b.hidden = !n; b.textContent = n; };
