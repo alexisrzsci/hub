@@ -1,5 +1,5 @@
 /* Alexis Hub service worker: works offline with the last saved app and board. */
-const CACHE = "hub-v2";
+const CACHE = "hub-v3";
 const SHELL = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {
