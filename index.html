@@ -233,6 +233,8 @@ li[data-sr] .row,li[data-sl] .row{touch-action:pan-y}
 .cover-r svg{width:18px;height:18px}
 .sheet{position:relative;margin-top:-26px;background:var(--bg);border-radius:26px 26px 0 0;padding:26px max(20px,env(safe-area-inset-left,0px)) 10px;display:grid;gap:22px;max-width:560px}
 .sheet h1{margin:0;font:600 28px/1.15 var(--f-display);letter-spacing:-.015em;text-wrap:balance}
+.sheet h1.long{font:600 19px/1.5 var(--f-body);letter-spacing:0;text-wrap:pretty}
+.blk p.read{font-size:16px;line-height:1.7;color:var(--ink)}
 .kick{margin:0 0 8px;font:500 11px var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--c,var(--accent))}
 .meta-line{margin:8px 0 0;color:var(--muted);font-size:14.5px;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center}
 .hr{height:1px;background:var(--line);margin:0}
@@ -420,8 +422,8 @@ const WXI = n => `<svg class="i" viewBox="0 0 48 48" style="stroke-width:2" aria
 
 /* ================= state ================= */
 let daily = null, jobs = null, loaded = false, offline = false;
-let marks = Object.assign({done:{}, saved:{}, hidden:{}, starred:{}, dismissed:{}, stage:{}, stageAt:{}, snap:{}, doneLog:{}, started:{}, snooze:{}, notes:{}, read:{}}, LS.get("fd-marks", {}));
-for(const k of ["done","saved","hidden","starred","dismissed","stage","stageAt","snap","doneLog","started","snooze","notes","read"]) if(!marks[k] || typeof marks[k] !== "object") marks[k] = {};
+let marks = Object.assign({done:{}, saved:{}, hidden:{}, starred:{}, dismissed:{}, stage:{}, stageAt:{}, snap:{}, doneLog:{}, started:{}, snooze:{}, notes:{}, read:{}, imported:{}}, LS.get("fd-marks", {}));
+for(const k of ["done","saved","hidden","starred","dismissed","stage","stageAt","snap","doneLog","started","snooze","notes","read","imported"]) if(!marks[k] || typeof marks[k] !== "object") marks[k] = {};
 const PHASES = ["Topic & registration","Literature review","Sentinel-2 data download","Pre-processing","Analysis & indices","Results & figures","Writing","Defence"];
 const storedMe = LS.get("fd-me", null);
 let me = Object.assign({reminders:[{id:"spaceapps", title:"NASA Space Apps Challenge", date:"2026-11-14", time:"09:00", count:true}], tfg:{phases:PHASES.map((t,i)=>({id:"p"+i, t, done:false}))}, beca:{target:null, log:[]}}, storedMe || {});
@@ -528,7 +530,17 @@ function stageOf(id){ return marks.stage[id] || (on("saved",id) ? "saved" : null
 function allJobs(){ return [...(jobs && jobs.fits || []).map(j => ({...j, _k:"fit"})), ...(jobs && jobs.maybe || []).map(j => ({...j, _k:"maybe"}))]; }
 function findJob(id){ const j = allJobs().find(x => jobId(x) === id); if(j) return j; const s = marks.snap[id]; return s ? {...s, _k:"saved", _gone:true} : null; }
 function statusTone(s){ s = String(s||"").toLowerCase(); if(/reject|declin|not selected|unsuccess/.test(s)) return "muted"; if(/action|test|assessment|document|deadline|reply/.test(s)) return "warn"; if(/interview|offer|next|shortlist/.test(s)) return "hot"; return ""; }
+const evId = e => "ev:"+slug((e.title||"")+(e.when||""));
+function importReminders(list){
+  if(!Array.isArray(list)) return; let ch = false;
+  for(const r of list){ if(!r || !r.id || marks.imported[r.id]) continue;
+    if(!me.reminders.some(x => x.id === r.id)) me.reminders.push({id:r.id, title:r.title, date:r.date, time:r.time||"", count:!!r.count});
+    if(r.note && !marks.notes["r:"+r.id]) marks.notes["r:"+r.id] = r.note;
+    marks.imported[r.id] = Date.now(); ch = true; }
+  if(ch){ saveMe(); saveMarks(); }
+}
 function findItem(id){
+  if(id.startsWith("ev:")){ const e = (daily && daily.events || []).find(x => evId(x) === id); if(e) return {t:e.title, c:"Calendar", due:""}; }
   const t = tasks().find(x => x.id === id); if(t) return {t:t.title, c:t.course, due:t.due||""};
   const m = mailItems().find(x => x.id === id); if(m) return {t:(m.type==="reply"?"Reply: ":"")+m.title, c:m.label, due:m.due||""};
   return null;
@@ -614,7 +626,7 @@ function parseHash(){ const h = location.hash.slice(1); if(!h) return {page:"tod
 function go(page, id){ route = {page, id:id||null}; history.pushState({r:route}, "", hashOf(route)); render(); window.scrollTo(0,0); }
 function setTab(page){ route = {page, id:null}; history.replaceState({r:route}, "", hashOf(route)); rev = null; render(); window.scrollTo(0,0); }
 function goBack(){ if(history.state && history.state.r && !TABS.includes(history.state.r.page) && history.length > 1){ history.back(); } else { const t = TAB_OF[route.page] || "today"; setTab(t); } }
-const TAB_OF = {task:"plan", add:"plan", msg:"mail", job:"jobs", app:"jobs", tfg:"projects", beca:"projects", english:"projects", settings:"today", weather:"today", field:"today"};
+const TAB_OF = {task:"plan", add:"plan", reminders:"plan", msg:"mail", job:"jobs", app:"jobs", tfg:"projects", beca:"projects", english:"projects", settings:"today", weather:"today", field:"today"};
 window.addEventListener("popstate", e => { route = (e.state && e.state.r) || parseHash(); rev = null; render(); });
 
 /* ================= shared pieces ================= */
@@ -627,6 +639,8 @@ function taskRow(t, opts={}){
     <div class="mid"><p class="nm">${esc(t.title)}</p><p class="sm">${esc(sub)}${on("started",t.id)&&!t.done?" · in progress":""}${marks.notes[t.id]?" · ✎ note":""}</p></div>
     <div class="end">${t.done ? "" : t.ms!=null ? tagFor(t.ms) : ""}</div></div></li>`;
 }
+function eventRow(e){ const id = evId(e);
+  return `<li class="c-sky" data-sr="done:${esc(id)}"><div class="sw-bg"><span class="r">✓ Done</span><span class="l"></span></div><div class="row"><button class="circle" data-act="done" data-id="${esc(id)}" aria-label="Mark ${esc(e.title)} as done">${I("check")}</button><div class="mid"><p class="nm">${esc(e.title)}</p><p class="sm">Google Calendar · ${esc(e.when)}</p></div><div class="end">${I("plan")}</div></div></li>`; }
 function mailRow(m){
   const c = MAILTONE[m.type]||"forest", init = (String(m.from||m.label||"?").trim()[0]||"?").toUpperCase();
   return `<li class="c-${c} ${m.read?"is-read":""}" data-go="msg" data-id="${esc(m.id)}"${m.read?"":` data-sr="read:${esc(m.id)}"`}>${m.read?"":`<div class="sw-bg"><span class="r">✓ ${m.type==="reply"?"Answered":"Read"}</span><span class="l"></span></div>`}
@@ -648,6 +662,7 @@ function needsYou(){
   const out = [];
   for(const t of tasks()) if(!t.done && !isSnoozed(t.id) && t.kind!=="countdown" && t.ms!=null && t.ms < 2*DAY) out.push({k:"task", t});
   for(const m of mailItems()) if(!m.read && (m.type==="reply" || m.type==="change")) out.push({k:"mail", m});
+  for(const e of daily && daily.events || []) if(!on("done", evId(e))) out.push({k:"event", e});
   return out;
 }
 function renderToday(){
@@ -671,10 +686,10 @@ function renderToday(){
   const ny = needsYou();
   h += `<section class="sec"><div class="sec-h"><h2>Needs you</h2>${ny.length?`<span class="eyebrow" style="margin:0">${ny.length} item${ny.length>1?"s":""}</span>`:""}</div>`;
   if(!daily && !loaded) h += `<div class="sk" style="height:130px"></div>`;
-  else if(ny.length) h += `<ul class="list">${ny.slice(0,5).map(x => x.k==="task" ? taskRow(x.t) : mailRow(x.m)).join("")}</ul>${ny.length>5?`<div class="fold"><button data-tab="plan">See everything in Plan</button></div>`:""}`;
+  else if(ny.length) h += `<ul class="list">${ny.slice(0,6).map(x => x.k==="task" ? taskRow(x.t) : x.k==="mail" ? mailRow(x.m) : eventRow(x.e)).join("")}</ul>${ny.length>6?`<div class="fold"><button data-tab="plan">See everything in Plan</button></div>`:""}`;
   else h += `<div class="calm-card">${I("leaf")}<div><b>You're all caught up</b><span>Nothing due in the next 48 hours and no replies waiting.</span></div></div>`;
-  const ev = daily && daily.events || [];
-  if(ev.length) h += `<ul class="list">${ev.map(e => `<li class="c-sky"><div class="row"><span class="avatar sq">${I("plan")}</span><div class="mid"><p class="nm">${esc(e.title)}</p><p class="sm">${esc(e.when)}</p></div><span></span></div></li>`).join("")}</ul>`;
+  const evDone = (daily && daily.events || []).filter(e => on("done", evId(e))).length;
+  if(evDone) h += `<p class="foot">✓ ${evDone} calendar item${evDone>1?"s":""} cleared · <button data-act="restoreev">show again</button></p>`;
   h += `</section>`;
 
   const mm = mailItems(), unread = mm.filter(m => !m.read).length, fits = jobs ? (jobs.fits||[]).filter(j => !on("hidden", jobId(j))).length : 0, due = dueCards().length, sp = nature.species;
@@ -719,7 +734,14 @@ function renderPlan(){
   const sd = fromKey(selDay);
   h += `<section class="sec"><div class="day-h"><h2>${selDay===tk?"Today":selDay===tomorrowKey()?"Tomorrow":esc(sd.toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"}))}</h2><span>${list.filter(x=>!x.done).length} open</span></div>`;
   h += list.length ? `<ul class="list">${list.map(x => x.kind==="opp" ? `<li class="c-sky" data-go="msg" data-id="${esc(x.id)}"><div class="row"><span class="avatar">${I("star")}</span><div class="mid"><p class="nm">${esc(x.title)}</p><p class="sm">Opportunity you starred</p></div><div class="end">${I("chev")}</div></div></li>` : taskRow(x, {sub:(x.kind==="deadline"?x.course:x.kind==="countdown"?"Countdown":"Reminder")+(String(x.due).includes("T")?" · "+dueDate(x.due).toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"}):"")})).join("")}</ul>`
-    : `<div class="empty"><span class="ill">${I("plan")}</span><b>A free day</b><p>Nothing planned. Tap + to add a reminder for this day.</p></div>`;
+    : `<button class="wxstrip" data-go="add" style="box-shadow:none"><span class="ico" style="color:var(--accent)">${I("leaf")}</span><span class="m"><b>A free day</b> · tap to add a reminder</span>${I("plus")}</button>`;
+  h += `</section>`;
+  const tkMs = fromKey(tk).getTime(), soon = tasks().filter(t => !t.done && t.dateKey && t.dateKey > tk && t.dateKey !== selDay && fromKey(t.dateKey).getTime() <= tkMs + 14*DAY);
+  const remN = (me.reminders||[]).length;
+  h += `<section class="sec"><div class="sec-h"><h2>Next two weeks</h2><button class="link" data-go="reminders">All reminders${remN?" ("+remN+")":""}</button></div>`;
+  if(soon.length){ const g = {}; for(const t of soon) (g[t.dateKey] = g[t.dateKey] || []).push(t);
+    h += Object.keys(g).sort().map(k => `<p class="eyebrow" style="margin:4px 2px -4px">${k===tomorrowKey()?"Tomorrow":esc(fromKey(k).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}))}</p><ul class="list">${g[k].map(t => taskRow(t)).join("")}</ul>`).join("");
+  } else h += `<p class="lede" style="margin:0">Nothing else in the next 14 days.</p>`;
   h += `</section>`;
   const undated = tasks().filter(t => !t.dateKey && !t.done);
   if(undated.length) h += `<section class="sec"><div class="sec-h"><h2>No date</h2></div><ul class="list">${undated.map(t=>taskRow(t)).join("")}</ul></section>`;
@@ -802,7 +824,7 @@ function pageTask(id){
   const st = t.done ? "done" : on("started", id) ? "started" : "todo", sn = isSnoozed(id);
   const right = t.kind!=="deadline" ? `<button data-go="add" data-id="${esc(t.rid)}" aria-label="Edit">${I("edit")}</button>` : "";
   let h = `<div class="detail c-${t.tone}">${cover(t.tone, "", t.kind==="deadline" ? (t.course||"").slice(0,3) : "", t.id, right)}<div class="sheet">
-    <div><p class="kick">${esc(t.kind==="deadline" ? t.course||"Deadline" : t.kind==="countdown" ? "Countdown" : "Reminder")}</p><h1>${esc(t.title)}</h1>
+    <div><p class="kick">${esc(t.kind==="deadline" ? t.course||"Deadline" : t.kind==="countdown" ? "Countdown" : "Reminder")}</p><h1 class="${String(t.title||"").length>60?"long":""}">${esc(t.title)}</h1>
     <p class="meta-line">${t.due?`<span>${fmtDue(t.due, true)}</span>${t.done?"":tagFor(t.ms)}`:"<span>No date</span>"}${sn&&!t.done?`<span class="tag">snoozed until tomorrow</span>`:""}</p></div>
     <div class="seg" role="group" aria-label="Status"><button data-act="status" data-v="todo" data-id="${esc(id)}" aria-pressed="${st==="todo"}">Not started</button><button data-act="status" data-v="started" data-id="${esc(id)}" aria-pressed="${st==="started"}">In progress</button><button data-act="status" data-v="done" data-id="${esc(id)}" aria-pressed="${st==="done"}">Done</button></div>
     <div class="hr"></div>
@@ -819,8 +841,9 @@ function pageMail(id){
   if(!m.read && m.type!=="reply"){ setMark("read", id, true); m.read = true; }
   const c = MAILTONE[m.type]||"forest", isOpp = m.type==="opp", star = isOpp && on("starred", id);
   let h = `<div class="detail c-${c}">${cover(c, "", (String(m.from||"?")[0]||"?").toUpperCase(), m.id)}<div class="sheet">
-    <div><p class="kick">${esc(m.label)}</p><h1>${esc(m.title)}</h1><p class="meta-line"><span>${esc(m.from||"")}</span>${m.date?`<span>· ${fmtDue(m.date)}</span>`:""}${m.due?tagFor(msUntil(m.due)):""}</p></div>
-    ${m.text?`<div class="hr"></div><div class="blk"><h3>${m.type==="reply"?"What they need":"Summary"}</h3><p>${esc(m.text)}</p></div>`:""}`;
+    <div><p class="kick">${esc(m.label)}</p><h1 class="${m.type!=="change"&&String(m.title||"").length>60?"long":""}">${m.type==="change"?"Room or schedule change":esc(m.title)}</h1><p class="meta-line"><span>${esc(m.from||"")}</span>${m.date?`<span>· ${fmtDue(m.date)}</span>`:""}${m.due?tagFor(msUntil(m.due)):""}</p></div>
+    ${m.type==="change"?`<div class="hr"></div><div class="blk"><h3>What changes</h3><p class="read">${esc(m.title)}</p></div>`:""}
+    ${m.text?`<div class="hr"></div><div class="blk"><h3>${m.type==="reply"?"What they need":"Summary"}</h3><p class="read">${esc(m.text)}</p></div>`:""}`;
   if(isOpp) h += `<div class="hr"></div><div class="blk"><button class="opt" data-act="star" data-id="${esc(id)}">${I("star")}<span class="grow">${star?"On your calendar":"Interested — add to my calendar"}</span><span class="val">${star?"tap to remove":""}</span></button><button class="opt" data-act="dismiss" data-id="${esc(id)}">${I("hide")}<span class="grow">Not for me</span></button></div>`;
   if(m.type==="reply") h += `<div class="hr"></div><div class="blk"><h3>Your notes</h3><textarea class="inp" data-note="${esc(id)}" placeholder="Draft points for your reply…">${esc(marks.notes[id]||"")}</textarea></div>`;
   h += `</div><div class="actionbar"><div class="in">${safeUrl(m.url)?`<a class="btn" href="${safeUrl(m.url)}" target="_blank" rel="noopener">${I("ext")} ${isOpp?"Details":"Open in Gmail"}</a>`:"<span></span>"}
@@ -862,6 +885,15 @@ function pageAdd(rid){
       <label class="toggle"><span><b style="font-weight:600">Show as countdown</b><br><span class="credit" style="font-family:var(--f-body)">For events you look forward to, like Space Apps</span></span><input type="checkbox" name="c" ${r&&r.count?"checked":""}></label>
       <button class="btn primary" type="submit" style="width:100%">${I("check")} ${r?"Save changes":"Add reminder"}</button>
     </form></div></div>`;
+}
+function pageReminders(){
+  const all = tasks().filter(t => t.kind !== "deadline"), up = all.filter(t => !t.done && (t.ms==null || t.ms > -DAY)), past = all.filter(t => t.done || (t.ms!=null && t.ms <= -DAY));
+  return `<div class="detail c-plum">${cover("plum","","","reminders",`<button data-go="add" aria-label="Add reminder">${I("plus")}</button>`)}<div class="sheet">
+    <div><p class="kick">Plan</p><h1>Your reminders</h1><p class="lede">Everything you've added yourself, soonest first.</p></div>
+    <div class="blk"><h3>Upcoming · ${up.length}</h3>${up.length ? `<ul class="list">${up.map(t => taskRow(t, {showDate:true})).join("")}</ul>` : `<p class="lede">No upcoming reminders.</p>`}</div>
+    ${past.length?`<div class="blk"><h3>Done & past · ${past.length}</h3><ul class="list">${past.map(t => taskRow(t, {showDate:true})).join("")}</ul></div>`:""}
+    <button class="btn primary" data-go="add">${I("plus")} Add a reminder</button>
+  </div></div>`;
 }
 function pageTfg(){
   const ph = me.tfg.phases||[], dn = ph.filter(p=>p.done).length, pct = ph.length ? dn/ph.length : 0, nx = ph.find(p=>!p.done);
@@ -961,7 +993,7 @@ function render(){
   const isTab = TABS.includes(route.page) && !route.id, key = route.page+"|"+(route.id||"");
   let html;
   if(isTab) html = `<div class="tab">${route.page==="plan"?renderPlan():route.page==="mail"?renderMail():route.page==="jobs"?renderJobs():route.page==="projects"?renderProjects():renderToday()}</div>`;
-  else html = {task:()=>pageTask(route.id), msg:()=>pageMail(route.id), job:()=>pageJob(route.id), app:()=>pageApp(route.id), add:()=>pageAdd(route.id), tfg:pageTfg, beca:pageBeca, english:pageEnglish, weather:pageWeather, field:pageField, settings:pageSettings}[route.page]?.() || notFound();
+  else html = {task:()=>pageTask(route.id), msg:()=>pageMail(route.id), job:()=>pageJob(route.id), app:()=>pageApp(route.id), add:()=>pageAdd(route.id), reminders:pageReminders, tfg:pageTfg, beca:pageBeca, english:pageEnglish, weather:pageWeather, field:pageField, settings:pageSettings}[route.page]?.() || notFound();
   const app = $("#app"), flipped = $("#wod") && $("#wod").classList.contains("flipped");
   app.innerHTML = html;
   if(key !== lastKey){ const f = app.firstElementChild; if(f) f.classList.add("enter"); lastKey = key; }
@@ -994,6 +1026,7 @@ document.addEventListener("click", e => {
     case "toggleread": { const m = mailItems().find(x => x.id === id); if(!m) return; if(m.type==="reply") setMark("done", id, !on("done", id)); else { const r = on("read", id) || on("dismissed", id); setMark("read", id, !r); if(r) delete marks.dismissed[id]; saveMarks(); } return fin(); }
     case "readall": for(const m of mailItems()) if(!m.read && m.type!=="reply" && (mailFilter==="all" || m.type===mailFilter)) marks.read[m.id] = Date.now(); saveMarks(); return render();
     case "showread": showRead = !showRead; return render();
+    case "restoreev": for(const e of daily && daily.events || []){ delete marks.done[evId(e)]; delete marks.doneLog[evId(e)]; } saveMarks(); return render();
     case "showhidden": showHidden = !showHidden; return render();
     case "star": toggle("starred", id); return;
     case "dismiss": setMark("dismissed", id, true); return goBack();
@@ -1114,7 +1147,7 @@ async function load(pass){
   catch(e){ offline = true; blob = LS.get("fd-blob", null); if(!blob) throw new Error("fetch"); }
   if(blob.stamp && blob.stamp === lastStamp && daily) return false;
   const data = await decrypt(pass, blob); LS.set("fd-blob", blob); lastStamp = blob.stamp || "";
-  daily = data.daily || null; jobs = data.jobs || null; loaded = true; syncWords(); backfillLog(); if(!busy()) render(); return true;
+  daily = data.daily || null; jobs = data.jobs || null; loaded = true; importReminders(data.reminders); syncWords(); backfillLog(); if(!busy()) render(); return true;
 }
 const getPass = () => { try { return localStorage.getItem("hub-key"); } catch(e){ return null; } };
 async function refreshAll(force){
