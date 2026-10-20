@@ -348,6 +348,20 @@ textarea.inp{resize:vertical;min-height:96px;line-height:1.5}
 @keyframes sk{from{background-position:100% 0}to{background-position:0 0}}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
 
+/* ---------- timesheet ---------- */
+.ts-doc{max-width:720px;margin:18px auto 0;background:#fff;color:#1B2620;border-radius:18px;padding:28px 24px;box-shadow:var(--shadow)}
+.ts-doc h1{margin:0 0 6px;font:600 22px/1.25 var(--f-display)}
+.ts-meta{margin:0 0 18px;color:#5b665d;font-size:13px}
+table.ts{width:100%;border-collapse:collapse;font-size:13px}
+table.ts th{text-align:left;font:600 11px var(--f-mono);text-transform:uppercase;letter-spacing:.06em;color:#5b665d;border-bottom:1.5px solid #1B2620;padding:8px 6px}
+table.ts td{padding:7px 6px;border-bottom:1px solid #e7e2d6;vertical-align:top}
+table.ts .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+table.ts tr.sub td{font-weight:600;background:#f4f1e8}
+table.ts tfoot td{font-weight:700;border-top:1.5px solid #1B2620;border-bottom:0;padding-top:10px}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:46px;font-size:12px;color:#5b665d}
+.sign span{display:block;border-bottom:1px solid #1B2620;height:36px;margin-bottom:6px}
+@media print{ body{background:#fff} .nav,.noprint,.ptr{display:none!important} .detail{padding:0;min-height:0} .ts-doc{box-shadow:none;margin:0;padding:0;max-width:none} @page{margin:16mm} }
+
 /* ---------- lock ---------- */
 .lock{position:fixed;inset:0;z-index:50;background:var(--bg);display:grid;place-items:center;padding:24px}
 .lock form{width:100%;max-width:360px;display:grid;gap:14px}
@@ -422,8 +436,8 @@ const WXI = n => `<svg class="i" viewBox="0 0 48 48" style="stroke-width:2" aria
 
 /* ================= state ================= */
 let daily = null, jobs = null, loaded = false, offline = false;
-let marks = Object.assign({done:{}, saved:{}, hidden:{}, starred:{}, dismissed:{}, stage:{}, stageAt:{}, snap:{}, doneLog:{}, started:{}, snooze:{}, notes:{}, read:{}, imported:{}}, LS.get("fd-marks", {}));
-for(const k of ["done","saved","hidden","starred","dismissed","stage","stageAt","snap","doneLog","started","snooze","notes","read","imported"]) if(!marks[k] || typeof marks[k] !== "object") marks[k] = {};
+let marks = Object.assign({done:{}, saved:{}, hidden:{}, starred:{}, dismissed:{}, stage:{}, stageAt:{}, snap:{}, doneLog:{}, started:{}, snooze:{}, notes:{}, read:{}, imported:{}, steps:{}}, LS.get("fd-marks", {}));
+for(const k of ["done","saved","hidden","starred","dismissed","stage","stageAt","snap","doneLog","started","snooze","notes","read","imported","steps"]) if(!marks[k] || typeof marks[k] !== "object") marks[k] = {};
 const PHASES = ["Topic & registration","Literature review","Sentinel-2 data download","Pre-processing","Analysis & indices","Results & figures","Writing","Defence"];
 const storedMe = LS.get("fd-me", null);
 let me = Object.assign({reminders:[{id:"spaceapps", title:"NASA Space Apps Challenge", date:"2026-11-14", time:"09:00", count:true}], tfg:{phases:PHASES.map((t,i)=>({id:"p"+i, t, done:false}))}, beca:{target:null, log:[]}}, storedMe || {});
@@ -530,6 +544,8 @@ function stageOf(id){ return marks.stage[id] || (on("saved",id) ? "saved" : null
 function allJobs(){ return [...(jobs && jobs.fits || []).map(j => ({...j, _k:"fit"})), ...(jobs && jobs.maybe || []).map(j => ({...j, _k:"maybe"}))]; }
 function findJob(id){ const j = allJobs().find(x => jobId(x) === id); if(j) return j; const s = marks.snap[id]; return s ? {...s, _k:"saved", _gone:true} : null; }
 function statusTone(s){ s = String(s||"").toLowerCase(); if(/reject|declin|not selected|unsuccess/.test(s)) return "muted"; if(/action|test|assessment|document|deadline|reply/.test(s)) return "warn"; if(/interview|offer|next|shortlist/.test(s)) return "hot"; return ""; }
+const stepsOf = id => marks.steps[id] || [];
+const stepCount = id => { const st = stepsOf(id); return st.length ? st.filter(x => x.done).length+"/"+st.length+" steps" : ""; };
 const evId = e => "ev:"+slug((e.title||"")+(e.when||""));
 function importReminders(list){
   if(!Array.isArray(list)) return; let ch = false;
@@ -537,6 +553,7 @@ function importReminders(list){
     if(!me.reminders.some(x => x.id === r.id)) me.reminders.push({id:r.id, title:r.title, date:r.date, time:r.time||"", count:!!r.count});
     if(r.note && !marks.notes["r:"+r.id]) marks.notes["r:"+r.id] = r.note;
     marks.imported[r.id] = Date.now(); ch = true; }
+  for(const r of list){ if(r && r.id && Array.isArray(r.steps) && !marks.steps["r:"+r.id]){ marks.steps["r:"+r.id] = r.steps.map((t,i) => ({id:"s"+i, t:String(t), done:false})); ch = true; } }
   if(ch){ saveMe(); saveMarks(); }
 }
 function findItem(id){
@@ -626,7 +643,7 @@ function parseHash(){ const h = location.hash.slice(1); if(!h) return {page:"tod
 function go(page, id){ route = {page, id:id||null}; history.pushState({r:route}, "", hashOf(route)); render(); window.scrollTo(0,0); }
 function setTab(page){ route = {page, id:null}; history.replaceState({r:route}, "", hashOf(route)); rev = null; render(); window.scrollTo(0,0); }
 function goBack(){ if(history.state && history.state.r && !TABS.includes(history.state.r.page) && history.length > 1){ history.back(); } else { const t = TAB_OF[route.page] || "today"; setTab(t); } }
-const TAB_OF = {task:"plan", add:"plan", reminders:"plan", msg:"mail", job:"jobs", app:"jobs", tfg:"projects", beca:"projects", english:"projects", settings:"today", weather:"today", field:"today"};
+const TAB_OF = {task:"plan", add:"plan", reminders:"plan", hoursheet:"projects", msg:"mail", job:"jobs", app:"jobs", tfg:"projects", beca:"projects", english:"projects", settings:"today", weather:"today", field:"today"};
 window.addEventListener("popstate", e => { route = (e.state && e.state.r) || parseHash(); rev = null; render(); });
 
 /* ================= shared pieces ================= */
@@ -636,7 +653,7 @@ function taskRow(t, opts={}){
   const sub = opts.sub !== undefined ? opts.sub : (t.kind==="deadline" ? t.course : t.kind==="countdown" ? "Countdown" : "Reminder") + (t.due && opts.showDate ? " · "+fmtDay(t.due) : "");
   return `<li class="c-${t.tone} ${t.done?"is-done":""}" data-go="task" data-id="${esc(t.id)}"${t.done?"":` data-sr="done:${esc(t.id)}"`}>${t.done?"":`<div class="sw-bg"><span class="r">✓ Done</span><span class="l"></span></div>`}
     <div class="row"><button class="circle ${t.done?"on":""}" data-act="done" data-id="${esc(t.id)}" aria-label="${t.done?"Mark not done":"Mark done"}">${I("check")}</button>
-    <div class="mid"><p class="nm">${esc(t.title)}</p><p class="sm">${esc(sub)}${on("started",t.id)&&!t.done?" · in progress":""}${marks.notes[t.id]?" · ✎ note":""}</p></div>
+    <div class="mid"><p class="nm">${esc(t.title)}</p><p class="sm">${esc(sub)}${on("started",t.id)&&!t.done?" · in progress":""}${stepCount(t.id)?" · "+stepCount(t.id):""}${marks.notes[t.id]?" · ✎ note":""}</p></div>
     <div class="end">${t.done ? "" : t.ms!=null ? tagFor(t.ms) : ""}</div></div></li>`;
 }
 function eventRow(e){ const id = evId(e);
@@ -828,6 +845,8 @@ function pageTask(id){
     <p class="meta-line">${t.due?`<span>${fmtDue(t.due, true)}</span>${t.done?"":tagFor(t.ms)}`:"<span>No date</span>"}${sn&&!t.done?`<span class="tag">snoozed until tomorrow</span>`:""}</p></div>
     <div class="seg" role="group" aria-label="Status"><button data-act="status" data-v="todo" data-id="${esc(id)}" aria-pressed="${st==="todo"}">Not started</button><button data-act="status" data-v="started" data-id="${esc(id)}" aria-pressed="${st==="started"}">In progress</button><button data-act="status" data-v="done" data-id="${esc(id)}" aria-pressed="${st==="done"}">Done</button></div>
     <div class="hr"></div>
+    ${stepsBlock(id)}
+    <div class="hr"></div>
     <div class="blk"><h3>Your notes</h3><textarea class="inp" data-note="${esc(id)}" placeholder="What's left, who to ask, links… saves automatically">${esc(marks.notes[id]||"")}</textarea></div>`;
   if(t.info || t.firstSeen) h += `<div class="hr"></div><div class="blk"><h3>From UMU email</h3>${t.info?`<p>${esc(t.info)}</p>`:""}${t.firstSeen?`<p class="credit">Added to your board ${daysSince(t.firstSeen)<=0?"today":ago(fromKey(t.firstSeen).getTime())}</p>`:""}</div>`;
   if(!t.done && t.kind!=="countdown") h += `<div class="hr"></div><div class="blk"><button class="opt" data-act="snooze" data-id="${esc(id)}">${I("snooze")}<span class="grow">${sn?"Un-snooze":"Snooze until tomorrow"}</span><span class="val">${sn?"hidden from Today":"hide from Today for a day"}</span></button>${t.kind!=="deadline"?`<button class="opt danger" data-act="delrem" data-id="${esc(t.rid)}">${I("trash")}<span class="grow">Delete</span></button>`:""}</div>`;
@@ -835,6 +854,12 @@ function pageTask(id){
   h += `</div><div class="actionbar"><div class="in"><div class="info"><b>${t.due?esc(fmtDay(t.due)):"No date"}</b><span>${t.done?"Completed":t.ms!=null?esc(rel(t.ms)):""}</span></div>
     ${t.done ? `<button class="btn" data-act="done" data-id="${esc(id)}">${I("undo")} Not done</button>` : `<button class="btn primary" data-act="done" data-id="${esc(id)}" data-back-after="1">${I("check")} Mark as done</button>`}</div></div></div>`;
   return h;
+}
+function stepsBlock(id){
+  const st = stepsOf(id), dn = st.filter(x => x.done).length, nx = st.find(x => !x.done);
+  return `<div class="blk"><div class="sec-h"><h3>Steps</h3>${st.length?`<span class="eyebrow" style="margin:0">${dn} of ${st.length}</span>`:""}</div>
+    ${st.length ? `<ul class="steps">${st.map(x => `<li class="${x.done?"done":x===nx?"next":""} c-moss"><button class="circle ${x.done?"on":""}" data-act="step" data-id="${esc(id)}" data-sid="${esc(x.id)}" aria-label="${x.done?"Undo":"Complete"} ${esc(x.t)}">${I("check")}</button><span class="st">${esc(x.t)}</span><button class="x" data-act="delstep" data-id="${esc(id)}" data-sid="${esc(x.id)}" aria-label="Delete step">×</button></li>`).join("")}</ul>` : `<p class="lede" style="margin:0">Break it into small steps so you always know where you left off.</p>`}
+    <form data-form="step" data-id="${esc(id)}"><div class="row2" style="grid-template-columns:1fr auto"><input class="inp" name="t" placeholder="Add a step" required><button class="btn">Add</button></div></form></div>`;
 }
 function pageMail(id){
   const m = mailItems().find(x => x.id === id); if(!m) return notFound();
@@ -895,6 +920,25 @@ function pageReminders(){
     <button class="btn primary" data-go="add">${I("plus")} Add a reminder</button>
   </div></div>`;
 }
+function hoursRows(){ return (me.beca.log||[]).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))); }
+function exportHoursCsv(){
+  const rows = [["Date","Hours","Activity"], ...hoursRows().map(e => [e.date, String(e.h).replace(".",","), (e.note||"").replace(/"/g,'""')])];
+  const tot = hoursRows().reduce((s,e)=>s+Number(e.h||0),0); rows.push(["Total", String(r1(tot)).replace(".",","), ""]);
+  const csv = "\ufeff"+rows.map(r => r.map(c => `"${c}"`).join(";")).join("\r\n");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv;charset=utf-8"})); a.download = "beca-hours-"+todayKey()+".csv";
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+function pageHoursheet(){
+  const rows = hoursRows(), byM = {}; for(const e of rows){ const k = String(e.date).slice(0,7); (byM[k] = byM[k]||[]).push(e); }
+  const tot = rows.reduce((s,e)=>s+Number(e.h||0),0), tg = Number(me.beca.target)||0;
+  return `<div class="detail sheet-print"><div class="noprint" style="padding:calc(var(--safe-t) + 14px) 20px 0;display:flex;justify-content:space-between;align-items:center"><button class="back" data-back aria-label="Back" style="position:static">${I("back")}</button><button class="btn primary" data-act="doprint">${I("download")} Save as PDF</button></div>
+    <div class="ts-doc"><p class="kick" style="color:var(--accent)">Universidad de Murcia</p><h1>Beca de colaboración 2026/27 — Hours timesheet</h1>
+    <p class="ts-meta">Alexis Daniel Rodríguez Zambrano · generated ${esc(new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}))}</p>
+    <table class="ts"><thead><tr><th>Date</th><th>Activity</th><th class="n">Hours</th></tr></thead><tbody>
+    ${Object.keys(byM).sort().map(k => byM[k].map(e => `<tr><td>${esc(fromKey(e.date).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"}))}</td><td>${esc(e.note||"—")}</td><td class="n">${esc(r1(Number(e.h)))}</td></tr>`).join("") + `<tr class="sub"><td colspan="2">${esc(fromKey(k+"-15").toLocaleDateString("en-GB",{month:"long",year:"numeric"}))} total</td><td class="n">${r1(byM[k].reduce((s,e)=>s+Number(e.h||0),0))}</td></tr>`).join("")}
+    </tbody><tfoot><tr><td colspan="2">Total${tg?" (target "+tg+" h)":""}</td><td class="n">${r1(tot)}</td></tr></tfoot></table>
+    <div class="sign"><div><span></span>Student signature</div><div><span></span>Supervisor signature</div></div></div></div>`;
+}
 function pageTfg(){
   const ph = me.tfg.phases||[], dn = ph.filter(p=>p.done).length, pct = ph.length ? dn/ph.length : 0, nx = ph.find(p=>!p.done);
   return `<div class="detail c-forest">${cover("forest", "", "", "tfg")}<div class="sheet">
@@ -916,6 +960,7 @@ function pageBeca(){
     <div class="hr"></div>
     <form class="blk" data-form="hours"><h3>Log hours</h3><div class="row2"><input class="inp" type="date" name="d" value="${todayKey()}" required aria-label="Day"><input class="inp" type="number" name="h" step="0.25" min="0.25" placeholder="Hours" required aria-label="Hours"></div><input class="inp" name="n" placeholder="What did you do? (optional)" aria-label="Note"><button class="btn primary" type="submit">${I("plus")} Log hours</button></form>
     <div class="hr"></div>
+    ${log.length?`<div class="blk"><h3>Export</h3><p>For the department: a timesheet with every entry and monthly totals.</p><div class="row2"><button class="btn" data-act="printhours">${I("download")} PDF timesheet</button><button class="btn" data-act="csv">${I("download")} Excel (CSV)</button></div></div><div class="hr"></div>`:""}
     <div class="blk"><h3>History</h3>${log.length ? Object.keys(byM).sort().reverse().map(k => `<p class="eyebrow" style="margin:6px 0 0">${esc(fromKey(k+"-15").toLocaleDateString("en-GB",{month:"long",year:"numeric"}))} · ${r1(byM[k].reduce((s,e)=>s+Number(e.h||0),0))} h</p><ul class="steps">${byM[k].map(e => `<li><span class="avatar c-moss" style="width:40px;height:40px;font-size:13px">${esc(e.h)}h</span><span><span class="st">${esc(fromKey(e.date).toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}))}</span>${e.note?`<br><span class="sd" style="font-family:var(--f-body)">${esc(e.note)}</span>`:""}</span><button class="x" data-act="delhours" data-id="${esc(e.id)}" aria-label="Delete entry">×</button></li>`).join("")}</ul>`).join("") : `<p class="lede">No hours logged yet.</p>`}</div>
     <form class="blk" data-form="target"><h3>Total hours target</h3><div class="row2" style="grid-template-columns:1fr auto"><input class="inp" type="number" name="t" min="0" placeholder="e.g. 300" value="${tg||""}"><button class="btn">Save</button></div></form>
   </div></div>`;
@@ -993,7 +1038,7 @@ function render(){
   const isTab = TABS.includes(route.page) && !route.id, key = route.page+"|"+(route.id||"");
   let html;
   if(isTab) html = `<div class="tab">${route.page==="plan"?renderPlan():route.page==="mail"?renderMail():route.page==="jobs"?renderJobs():route.page==="projects"?renderProjects():renderToday()}</div>`;
-  else html = {task:()=>pageTask(route.id), msg:()=>pageMail(route.id), job:()=>pageJob(route.id), app:()=>pageApp(route.id), add:()=>pageAdd(route.id), reminders:pageReminders, tfg:pageTfg, beca:pageBeca, english:pageEnglish, weather:pageWeather, field:pageField, settings:pageSettings}[route.page]?.() || notFound();
+  else html = {task:()=>pageTask(route.id), msg:()=>pageMail(route.id), job:()=>pageJob(route.id), app:()=>pageApp(route.id), add:()=>pageAdd(route.id), reminders:pageReminders, hoursheet:pageHoursheet, tfg:pageTfg, beca:pageBeca, english:pageEnglish, weather:pageWeather, field:pageField, settings:pageSettings}[route.page]?.() || notFound();
   const app = $("#app"), flipped = $("#wod") && $("#wod").classList.contains("flipped");
   app.innerHTML = html;
   if(key !== lastKey){ const f = app.firstElementChild; if(f) f.classList.add("enter"); lastKey = key; }
@@ -1034,6 +1079,11 @@ document.addEventListener("click", e => {
     case "hide": toggle("hidden", id); return;
     case "hero": heroIdx++; return render();
     case "refresh": refreshAll(true).finally(render); return;
+    case "step": { const st = stepsOf(id), x = st.find(y => y.id === t.dataset.sid); if(x){ x.done = !x.done; if(x.done && !on("done", id)) marks.started[id] = marks.started[id] || Date.now(); saveMarks(); } return render(); }
+    case "delstep": marks.steps[id] = stepsOf(id).filter(y => y.id !== t.dataset.sid); if(!marks.steps[id].length) delete marks.steps[id]; saveMarks(); return render();
+    case "csv": return exportHoursCsv();
+    case "printhours": return go("hoursheet");
+    case "doprint": return window.print();
     case "phase": { const p = me.tfg.phases.find(x => x.id === id); if(p){ p.done = !p.done; p.at = p.done ? Date.now() : null; saveMe(); } return render(); }
     case "delphase": me.tfg.phases = me.tfg.phases.filter(p => p.id !== id); saveMe(); return render();
     case "delhours": if(!confirm("Delete this entry?")) return; me.beca.log = me.beca.log.filter(x => x.id !== id); saveMe(); return render();
@@ -1066,6 +1116,7 @@ document.addEventListener("submit", e => {
     if(v("n")) marks.notes["r:"+r.id] = v("n"); else delete marks.notes["r:"+r.id];
     saveMe(); saveMarks(); selDay = r.date; const d = fromKey(r.date); calY = d.getFullYear(); calM = d.getMonth();
     if(rid) return goBack(); route = {page:"plan", id:null}; history.replaceState({r:route}, "", hashOf(route)); return render(); }
+  if(k==="step" && v("t")){ const id = f.dataset.id; (marks.steps[id] = marks.steps[id] || []).push({id:"s"+Date.now(), t:v("t"), done:false}); saveMarks(); return render(); }
   if(k==="phase" && v("t")) me.tfg.phases.push({id:"p"+Date.now(), t:v("t"), done:false});
   if(k==="hours" && v("d") && Number(v("h")) > 0) me.beca.log.push({id:"h"+Date.now(), date:v("d"), h:Number(v("h")), note:v("n")});
   if(k==="target") me.beca.target = Number(v("t")) || null;
